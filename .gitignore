@@ -1,0 +1,71 @@
+# Root-level folders in this repo:
+# - backend/
+# - frontend/
+
+# Dependency directories
+/backend/node_modules/
+/frontend/node_modules/
+
+# Backend build and runtime artifacts
+/backend/dist/
+/backend/coverage/
+/backend/.nyc_output/
+/backend/logs/
+/backend/*.log
+/backend/npm-debug.log*
+/backend/yarn-debug.log*
+/backend/yarn-error.log*
+/backend/pnpm-debug.log*
+/backend/lerna-debug.log*
+/backend/*.pid
+/backend/*.pid.lock
+/backend/tmp/
+/backend/temp/
+
+# Frontend build and runtime artifacts
+/frontend/.next/
+/frontend/out/
+/frontend/.vercel/
+/frontend/.turbo/
+/frontend/.swc/
+/frontend/build/
+/frontend/dist/
+/frontend/coverage/
+/frontend/.nyc_output/
+/frontend/logs/
+/frontend/*.log
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+/frontend/pnpm-debug.log*
+
+# Environment files
+/backend/.env
+/backend/.env.*
+!/backend/.env.example
+/frontend/.env
+/frontend/.env.*
+!/frontend/.env.example
+
+# TypeScript and tooling caches
+/backend/*.tsbuildinfo
+/frontend/*.tsbuildinfo
+**/.eslintcache
+**/.cache/
+
+# Local database files (Prisma/SQLite)
+/backend/prisma/*.db
+/backend/prisma/*.db-journal
+
+# Prisma migrations
+/backend/prisma/migrations/
+
+# IDE and OS files
+.vscode/
+.idea/
+**/.DS_Store
+
+# Keep nested ignore files trackable
+!**/.gitignore
+
+Soko Shop.csv

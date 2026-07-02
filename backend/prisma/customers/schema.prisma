@@ -1,0 +1,143 @@
+// This is your modified Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "mysql"
+  url       = env("MYSQL_PRISMA_URL") 
+}
+
+model customer {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  firstName    String   @db.VarChar(255)
+  lastName     String   @db.VarChar(255)
+  email        String   @unique @db.VarChar(255)
+  phone        String   @db.VarChar(255)
+  address      String?  @db.VarChar(255)
+  city         String?  @db.VarChar(255)
+  locationZone String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  orders       order[]
+  sessions     session[]
+
+  @@index([firstName, lastName, email])
+  @@map("customers")
+}
+
+model session {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  customerId   String   @map("customer_id") @db.VarChar(255)
+  sessionToken String   @unique @map("session_token") @db.VarChar(255)
+  startedAt    DateTime @default(now()) @map("started_at") @db.Timestamp(6)
+
+  customer     customer @relation(fields: [customerId], references: [id])
+
+  @@map("sessions")
+}
+
+model product {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  sku          String   @unique @db.VarChar(255)
+  name         String   @db.VarChar(255)
+  description  String?  @db.Text
+  category     String   @db.VarChar(255)
+  subCategory  String?  @db.VarChar(255)
+  brand        String?  @db.VarChar(255)
+  unit         String?  @db.VarChar(255)
+  unitCost     Decimal  @db.Decimal(10, 2)
+  quantity     Int      @default(0)
+  imageUrl     String?  @db.VarChar(255)
+  locationZone String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  
+  orderDetails       order_detail[] 
+  complementsProduct product_complement[] @relation("ProductToComplement")
+  complementsAsItem  product_complement[] @relation("ComplementToProduct")
+
+  @@index([category])
+  @@map("products")
+}
+
+model parts_catalogue {
+  id             String   @id @default(uuid()) @db.VarChar(255)
+  sku            String   @unique @db.VarChar(255)
+  make           String   @db.VarChar(255)
+  model          String   @db.VarChar(255)
+  yearFrom       Int
+  yearTo         Int
+  engineCc       Int
+  batteryType    String   @db.VarChar(255)
+  voltage        Int
+  capacityAh     Int
+  cca            Int
+  brand          String   @db.VarChar(255)
+  priceKes       Decimal  @db.Decimal(10, 2)
+  stock          Int      @default(0)
+  branchLocation String?  @db.VarChar(255)
+  warrantyMonths Int
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("parts_catalogues")
+}
+
+model product_complement {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  productId    String   @map("product_id") @db.VarChar(255)
+  complementId String   @map("complement_id") @db.VarChar(255)
+
+  product      product  @relation("ProductToComplement", fields: [productId], references: [id])
+  complement   product  @relation("ComplementToProduct", fields: [complementId], references: [id])
+
+  @@unique([productId, complementId])
+  @@map("product_complements")
+}
+
+model order {
+  id              String   @id @default(uuid()) @db.VarChar(255)
+  customerId      String   @map("customer_id") @db.VarChar(255)
+  sessionId       String?  @map("session_id") @db.VarChar(255)
+  orderNumber     String?  @db.VarChar(255)
+  orderAmount     Decimal  @db.Decimal(10, 2)
+  orderDate       DateTime
+  description     String?  @db.Text
+  paymentMethod   String   @db.VarChar(255)
+  shippingAddress String   @db.VarChar(255)
+  status          String   @default("pending") @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  customer        customer @relation(fields: [customerId], references: [id])
+  items           order_detail[]
+
+  @@map("orders")
+}
+
+model order_detail {
+  id            String   @id @default(uuid()) @db.VarChar(255)
+  orderId       String   @map("order_id") @db.VarChar(255)
+  productId     String   @map("product_id") @db.VarChar(255)
+  customerName  String   @map("full_name")  @db.VarChar(511)
+  phoneNumber   String   @map("phone") @db.VarChar(255)
+  productName   String   @map("product_name") @db.VarChar(255)
+  category      String   @map("category") @db.VarChar(255)
+  unitCost      Decimal  @db.Decimal(10, 2)
+  quantity      Int      @default(0)
+  totalCost     Decimal  @db.Decimal(10, 2)
+  paymentMethod String   @db.VarChar(255)
+  status        String   @default("pending") @db.VarChar(255)
+  city          String   @map("city") @db.VarChar(255)
+  orderDate     DateTime? @default(now()) @map("order_date") @db.Timestamp(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  order         order    @relation(fields: [orderId], references: [id])
+  product       product  @relation(fields: [productId], references: [id])
+
+  @@map("order_details")
+}
