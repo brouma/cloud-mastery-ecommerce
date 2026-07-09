@@ -59,16 +59,6 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           install_components: 'beta'
 
-      - name: Enable required APIs for Cloud Functions
-        run: |
-          gcloud services enable \
-            cloudfunctions.googleapis.com \
-            run.googleapis.com \
-            cloudbuild.googleapis.com \
-            artifactregistry.googleapis.com \
-            eventarc.googleapis.com \
-            storage.googleapis.com
-
       - name: Configure Docker for Google Cloud
         run: |
           gcloud auth configure-docker
