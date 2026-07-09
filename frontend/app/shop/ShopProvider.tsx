@@ -23,6 +23,7 @@ type Session = {
   name: string;
   phone: string;
   location: string;
+  createdAt?: number;
 } | null;
 
 type ShopContextType = {
@@ -48,7 +49,16 @@ function readSession(): Session {
   if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    
+    // Check if session is older than 20 minutes
+    if (parsed.createdAt && Date.now() - parsed.createdAt > 20 * 60 * 1000) {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(CART_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -57,6 +67,7 @@ function readSession(): Session {
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [session, setSession] = useState<Session>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
 
   // ── Hydrate cart and session from sessionStorage on mount ──
@@ -70,7 +81,46 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         setCartItems([]);
       }
     }
-    setSession(readSession());
+
+    const updateActiveId = () => {
+      const sess = readSession();
+      setSession(sess);
+      const aid = typeof window !== "undefined"
+        ? (sessionStorage.getItem("agent-session-id") || sess?.sessionId || null)
+        : null;
+      setActiveSessionId(aid);
+    };
+
+    updateActiveId();
+
+    window.addEventListener("hazel-session-changed", updateActiveId);
+    return () => {
+      window.removeEventListener("hazel-session-changed", updateActiveId);
+    };
+  }, []);
+
+  // ── Active Session Expiry Check ──
+  useEffect(() => {
+    const checkExpiry = () => {
+      const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.createdAt && Date.now() - parsed.createdAt > 20 * 60 * 1000) {
+          sessionStorage.removeItem(SESSION_STORAGE_KEY);
+          sessionStorage.removeItem(CART_STORAGE_KEY);
+          setSession(null);
+          setCartItems([]);
+          
+          // Force reload to completely reset UI state and redirect to form
+          window.location.reload();
+        }
+      } catch {}
+    };
+
+    // Check every minute
+    const interval = setInterval(checkExpiry, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // ── Persist cart to sessionStorage whenever it changes ──
@@ -80,17 +130,11 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
 
   // ── Poll the Python cart service every 4 seconds to sync agent-added items ──
   useEffect(() => {
-    if (!session?.sessionId) return;
+    if (!activeSessionId) return;
 
     const sync = async () => {
-      // Prefer the agent's Dialogflow CX session ID once df-response-received
-      // fires and writes it to sessionStorage. Fall back to the form UUID.
-      const sid =
-        sessionStorage.getItem("agent-session-id") || session?.sessionId;
-      if (!sid) return;
-
       try {
-        const res = await getCartFromApi(sid);
+        const res = await getCartFromApi(activeSessionId);
         if (!res.success) return;
 
         // Merge agent-side cart items into React state.
@@ -127,7 +171,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     sync(); // Immediate first fetch
     const interval = setInterval(sync, 4000);
     return () => clearInterval(interval);
-  }, [session?.sessionId]);
+  }, [activeSessionId]);
 
   // ── Cart mutation helpers ──
 

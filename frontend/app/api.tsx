@@ -103,7 +103,7 @@ export const removeCartItemApi = async (sessionId: string, productId: string) =>
 };
 
 // ─── Express Checkout API ───────────────────────────────────────────────────
-const rawExpressUrl = process.env.NEXT_PUBLIC_EXPRESS_API_URL || "http://localhost:8080";
+const rawExpressUrl = process.env.NEXT_PUBLIC_EXPRESS_API_URL || rawCartUrl || "http://localhost:8080";
 export const EXPRESS_API_URL = rawExpressUrl.replace(/\/+$/, "");
 
 export const checkoutCartApi = async (sessionId: string) => {

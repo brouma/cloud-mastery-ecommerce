@@ -44,16 +44,18 @@ export default function ChatWidget() {
       const [resource, options] = args;
       const url = typeof resource === "string" ? resource : (resource as any)?.url;
 
-      if (url && url.includes(":runSession")) {
+      if (url && (url.includes(":runSession") || url.includes(":converseConversation") || url.includes(":detectIntent"))) {
         try {
-          // Extract "dfMessenger-..." from ".../sessions/dfMessenger-...:runSession"
-          const match = url.match(/\/sessions\/([^:]+):runSession/);
+          // Extract "dfMessenger-..." from ".../sessions/dfMessenger-...:runSession" or "...:converseConversation"
+          const match = url.match(/\/sessions\/([^:]+):/);
           if (match && match[1]) {
             const agentSessionId = match[1];
 
             if (sessionStorage.getItem("agent-session-id") !== agentSessionId) {
               sessionStorage.setItem("agent-session-id", agentSessionId);
               console.debug("[ChatWidget] Intercepted agent session ID from URL:", agentSessionId);
+
+              window.dispatchEvent(new Event("hazel-session-changed"));
 
               const storedStr = sessionStorage.getItem("hazel-session");
               if (storedStr) {

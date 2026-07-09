@@ -34,8 +34,10 @@ export default function OnboardingForm({ onComplete }: OnboardingFormProps) {
       await createSession({ sessionId, name: name.trim(), phone: phone.trim(), location: location.trim() });
 
       // Persist to sessionStorage — cleared automatically on tab close / refresh
-      const session = { sessionId, name: name.trim(), phone: phone.trim(), location: location.trim() };
+      const session = { sessionId, name: name.trim(), phone: phone.trim(), location: location.trim(), createdAt: Date.now() };
       sessionStorage.setItem("hazel-session", JSON.stringify(session));
+
+      window.dispatchEvent(new Event("hazel-session-changed"));
 
       onComplete(session);
     } catch {

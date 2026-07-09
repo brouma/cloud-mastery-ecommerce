@@ -87,24 +87,6 @@ export default function ShopOrdersPage() {
         </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <label htmlFor="customer" className="text-sm font-semibold text-slate-700">
-          Select customer
-        </label>
-        <select
-          id="customer"
-          value={selectedCustomerId}
-          onChange={(event) => setSelectedCustomerId(event.target.value)}
-          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-slate-600 focus:outline-none"
-        >
-          {customers.map((customer) => (
-            <option key={customer.id} value={customer.id}>
-              {customer.firstName} {customer.lastName}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {loading ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">
           Loading ordered items...
