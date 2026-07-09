@@ -23,8 +23,6 @@ jobs:
       BQ_DATASET: ${{ vars.BQ_DATASET || 'cloud_mastery' }}
       BQ_PRODUCTS_TABLE: ${{ vars.BQ_PRODUCTS_TABLE || 'products' }}
       CONNECT_BIGQUERY_TABLES: ${{ vars.CONNECT_BIGQUERY_TABLES || 'table_parts_catalog,table_finance,orders,order_details,customers,products' }}
-      BACKEND_IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.CLOUD_RUN_BACKEND_SERVICE_NAME }}:${{ github.sha }}
-      FRONTEND_IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.CLOUD_RUN_FRONTEND_SERVICE_NAME }}:${{ github.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,6 +56,15 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           install_components: 'beta'
+
+      - name: Prepare lowercase image tags
+        run: |
+          PROJECT_ID_LC="$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')"
+          BACKEND_SERVICE_LC="$(echo "$BACKEND_SERVICE_NAME" | tr '[:upper:]' '[:lower:]')"
+          FRONTEND_SERVICE_LC="$(echo "$FRONTEND_SERVICE_NAME" | tr '[:upper:]' '[:lower:]')"
+
+          echo "BACKEND_IMAGE=gcr.io/${PROJECT_ID_LC}/${BACKEND_SERVICE_LC}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "FRONTEND_IMAGE=gcr.io/${PROJECT_ID_LC}/${FRONTEND_SERVICE_LC}:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
       - name: Configure Docker for Google Cloud
         run: |
