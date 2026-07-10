@@ -338,6 +338,28 @@ export default function ChatWidget() {
     setChatReady(true);
   };
 
+  // Sync CES titlebar close action with local fold state.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleContainerClick = (event: Event) => {
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      const clickedCloseButton = path.some((node) => {
+        return node instanceof HTMLElement && node.tagName.toLowerCase() === "chat-messenger-close-button";
+      });
+
+      if (clickedCloseButton) {
+        setIsFolded(true);
+      }
+    };
+
+    container.addEventListener("click", handleContainerClick, true);
+    return () => {
+      container.removeEventListener("click", handleContainerClick, true);
+    };
+  }, [chatReady]);
+
   if (!deploymentName) return null;
 
   return (
@@ -362,8 +384,8 @@ export default function ChatWidget() {
         onClick={() => setIsFolded(!isFolded)}
         style={{
           position: "absolute",
-          left: isFolded ? "16px" : "14px",
-          top: isFolded ? "16px" : "13px",
+          left: isFolded ? "16px" : "270px",
+          top: isFolded ? "16px" : "20px",
           zIndex: 100000,
           background: isFolded ? "rgba(255, 255, 255, 0.15)" : "rgba(255, 255, 255, 0.15)",
           border: "none",
@@ -375,7 +397,7 @@ export default function ChatWidget() {
           justifyContent: "center",
           cursor: "pointer",
           color: isFolded ? "#4a3b32" : "#898989",
-          transition: "background 0.2s, transform 0.3s",
+          transition: "background 0.2s, transform 0.9s",
         }}
         title={isFolded ? "Expand Agent" : "Collapse Agent"}
         aria-label={isFolded ? "Expand Agent" : "Collapse Agent"}
