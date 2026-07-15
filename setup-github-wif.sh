@@ -16,6 +16,7 @@ WIF_POOL_ID="${WIF_POOL_ID:-github-pool-v1}"
 WIF_PROVIDER_ID="${WIF_PROVIDER_ID:-github-provider-v1}"
 GITHUB_OWNER="${GITHUB_OWNER:-Pawa-IT-Solutions}"
 GITHUB_REPO="${GITHUB_REPO:-cloud-mastery-ecommerce-2026}"
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-${GITHUB_OWNER}/${GITHUB_REPO}}"
 MYSQL_PRISMA_SECRET_NAME="${MYSQL_PRISMA_SECRET_NAME:-MYSQL_PRISMA_URL}"
 BIGQUERY_CONNECTION_ID="${BIGQUERY_CONNECTION_ID:-agent-builder-conn}"
 BIGQUERY_CONNECTION_LOCATION="${BIGQUERY_CONNECTION_LOCATION:-us}"
@@ -35,7 +36,7 @@ CLOUDSQL_INSTANCE_CONNECTION_NAME="${CLOUDSQL_INSTANCE_CONNECTION_NAME:-}"
 # Derived values
 # -----------------------------
 SA_EMAIL="${SA_NAME}@${WIF_PROJECT_ID}.iam.gserviceaccount.com"
-REPO_PRINCIPAL="principalSet://iam.googleapis.com/projects/${WIF_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/attribute.repository/${GITHUB_OWNER}/${GITHUB_REPO}"
+REPO_PRINCIPAL="principalSet://iam.googleapis.com/projects/${WIF_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/attribute.repository/${GITHUB_REPOSITORY}"
 WIF_PROVIDER_RESOURCE="projects/${WIF_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL_ID}/providers/${WIF_PROVIDER_ID}"
 DISCOVERY_ENGINE_SA="service-${DEPLOY_PROJECT_NUMBER}@gcp-sa-discoveryengine.iam.gserviceaccount.com"
 
@@ -43,6 +44,7 @@ echo "WIF Project: ${WIF_PROJECT_ID} (${WIF_PROJECT_NUMBER})"
 echo "Deploy Project: ${DEPLOY_PROJECT_ID} (${DEPLOY_PROJECT_NUMBER})"
 echo "Service Account: ${SA_EMAIL}"
 echo "Discovery Engine SA: ${DISCOVERY_ENGINE_SA}"
+echo "GitHub Repository: ${GITHUB_REPOSITORY}"
 echo "Repo Principal: ${REPO_PRINCIPAL}"
 echo "WIF Provider: ${WIF_PROVIDER_RESOURCE}"
 
@@ -103,9 +105,11 @@ for ROLE in \
   roles/cloudbuild.builds.builder \
   roles/run.admin \
   roles/cloudfunctions.admin \
+  roles/cloudsql.admin \
   roles/cloudsql.client \
   roles/iap.tunnelResourceAccessor \
   roles/iap.httpsResourceAccessor \
+  roles/iam.workloadIdentityUser \
   roles/iam.serviceAccountTokenCreator \
   roles/iam.serviceAccountUser \
   roles/serviceusage.serviceUsageAdmin \
@@ -257,3 +261,4 @@ printf '%s\n' "Done. Set these GitHub secrets:" \
   "GCP_WORKLOAD_IDENTITY_PROVIDER=${WIF_PROVIDER_RESOURCE}"
 
 echo "Optional overrides for reruns: SA_NAME, WIF_PROJECT_ID, WIF_PROJECT_NUMBER, DEPLOY_PROJECT_ID, WIF_POOL_ID, WIF_PROVIDER_ID, GITHUB_OWNER, GITHUB_REPO, BIGQUERY_CONNECTION_ID, BIGQUERY_CONNECTION_LOCATION, BIGQUERY_CONNECTION_DISPLAY_NAME, MAPS_API_ADMIN_ROLE"
+echo "Also supported override: GITHUB_REPOSITORY (owner/repo)"
