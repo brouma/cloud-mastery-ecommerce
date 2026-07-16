@@ -11,6 +11,7 @@ app.use(bodyParser.json());
 const CARTS = {};
 const SESSIONS = {};
 const ORDERS = {};
+const PENDING_WRITES = {}; // The locking dictionary
 
 const PESAPAL_BASE_URL = process.env.PESAPAL_BASE_URL || "https://cybqa.pesapal.com/pesapalv3";
 const PESAPAL_CONSUMER_KEY = process.env.PESAPAL_CONSUMER_KEY;
@@ -21,96 +22,25 @@ const PESAPAL_BRANCH = process.env.PESAPAL_BRANCH || "Store Name - HQ";
 const PESAPAL_DEMO_AMOUNT = process.env.PESAPAL_DEMO_AMOUNT || "1";
 const PESAPAL_PLACEHOLDER_EMAIL = process.env.PESAPAL_PLACEHOLDER_EMAIL || "demo@sokoai.africa";
 
+const PORT = process.env.PORT || 8080;
+const CART_SERVICE_URL = process.env.CART_SERVICE_URL || `http://localhost:${PORT}`;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // ==========================================
 // BIGQUERY CONFIG & DATA ACCESS LOGIC
 // ==========================================
-const bigquery = new BigQuery({ projectId: "pawait-data-hub" });
-const SESSION_TABLE =
-  process.env.SESSION_TABLE || "pawait-data-hub.cloud_mastery.cart_sessions";
-let ensureSessionTablePromise = null;
+const BQ_PROJECT = process.env.BQ_PROJECT;
+const BQ_DATASET = process.env.BQ_DATASET || "cloud_mastery";
+const BQ_PRODUCTS_TABLE = process.env.BQ_PRODUCTS_TABLE || "products";
+const BQ_PARTS_CATALOG_TABLE = process.env.BQ_PARTS_CATALOG_TABLE || "table_parts_catalog";
 
-function sanitizeSession(session = {}) {
-  return {
-    name: session.name || "",
-    phone: session.phone || "",
-    location: session.location || "",
-  };
-}
-
-async function ensureSessionTable() {
-  if (!ensureSessionTablePromise) {
-    ensureSessionTablePromise = bigquery.query({
-      query: `
-        CREATE TABLE IF NOT EXISTS \`${SESSION_TABLE}\` (
-          sessionId STRING NOT NULL,
-          name STRING,
-          phone STRING,
-          location STRING,
-          createdAt TIMESTAMP,
-          updatedAt TIMESTAMP
-        )
-      `,
-    });
-  }
-
-  await ensureSessionTablePromise;
-}
-
-async function upsertSession(sessionId, session) {
-  const payload = sanitizeSession(session);
-  await ensureSessionTable();
-  await bigquery.query({
-    query: `
-      MERGE \`${SESSION_TABLE}\` T
-      USING (
-        SELECT
-          @sessionId AS sessionId,
-          @name AS name,
-          @phone AS phone,
-          @location AS location,
-          CURRENT_TIMESTAMP() AS nowTs
-      ) S
-      ON T.sessionId = S.sessionId
-      WHEN MATCHED THEN
-        UPDATE SET
-          name = S.name,
-          phone = S.phone,
-          location = S.location,
-          updatedAt = S.nowTs
-      WHEN NOT MATCHED THEN
-        INSERT (sessionId, name, phone, location, createdAt, updatedAt)
-        VALUES (S.sessionId, S.name, S.phone, S.location, S.nowTs, S.nowTs)
-    `,
-    params: {
-      sessionId,
-      name: payload.name,
-      phone: payload.phone,
-      location: payload.location,
-    },
-  });
-}
-
-async function readSessionFromStore(sessionId) {
-  await ensureSessionTable();
-  const [rows] = await bigquery.query({
-    query: `
-      SELECT name, phone, location
-      FROM \`${SESSION_TABLE}\`
-      WHERE sessionId = @sessionId
-      ORDER BY updatedAt DESC
-      LIMIT 1
-    `,
-    params: { sessionId },
-  });
-
-  if (!rows.length) return null;
-  return sanitizeSession(rows[0]);
-}
+const bigquery = new BigQuery({ projectId: BQ_PROJECT });
 
 async function getProduct(productId) {
   const query = `
     SELECT name, unitCost, quantity
-    FROM \`pawait-data-hub.cloud_mastery.products\`
+    FROM \`${BQ_PROJECT}.${BQ_DATASET}.${BQ_PRODUCTS_TABLE}\`
     WHERE id = @productId
 
     UNION ALL
@@ -119,7 +49,7 @@ async function getProduct(productId) {
       CONCAT(brand, ' ', batteryType, ' Battery') AS name,
       priceKes AS unitCost,
       stock AS quantity
-    FROM \`pawait-data-hub.cloud_mastery.table_parts_catalog\`
+    FROM \`${BQ_PROJECT}.${BQ_DATASET}.${BQ_PARTS_CATALOG_TABLE}\`
     WHERE id = @productId
 
     LIMIT 1
@@ -130,17 +60,6 @@ async function getProduct(productId) {
   };
   const [rows] = await bigquery.query(options);
   return rows.length ? rows[0] : null;
-}
-
-const PORT = process.env.PORT || 8080;
-
-function getCartServiceUrl(req) {
-  if (process.env.CART_SERVICE_URL) {
-    return process.env.CART_SERVICE_URL;
-  }
-
-  // In Cloud Functions/Run, this resolves to the deployed function URL host.
-  return `${req.protocol}://${req.get("host")}`;
 }
 
 function splitName(fullName) {
@@ -179,22 +98,23 @@ function recalc(cart) {
 }
 
 // ==========================================
-// CART ENDPOINTS (OPENAPI YAML COMPLIANT)
+// WRITERS (Action Endpoints)
 // ==========================================
 
 // POST /addToCart
 app.post("/addToCart", async (req, res) => {
-  const sessionId = req.query.sessionId;
+  const sessionId = req.query.sessionId || req.body.sessionId;
   if (!sessionId) {
-    return res.status(400).json({ message: "sessionId query parameter is required" });
+    return res.status(400).json({ message: "sessionId is required" });
   }
 
   const { productId, quantity = 1 } = req.body;
   
+  // 🚨 CRITICAL: Lock immediately before any awaits
+  PENDING_WRITES[sessionId] = true;
+  
   try {
-    // Fetch product details from BigQuery
     const product = await getProduct(productId);
-
     if (!product) {
       return res.status(404).json({ message: "productId not found in catalogue." });
     }
@@ -203,7 +123,6 @@ app.post("/addToCart", async (req, res) => {
     const existingItem = cart.items.find(item => item.productId === productId);
     const totalRequestedQuantity = (existingItem ? existingItem.quantity : 0) + quantity;
 
-    // BigQuery query returns available stock under the 'quantity' field alias
     if (totalRequestedQuantity > product.quantity) {
       return res.status(409).json({ message: "Requested quantity exceeds available stock." });
     }
@@ -222,30 +141,50 @@ app.post("/addToCart", async (req, res) => {
     }
 
     recalc(cart);
-    return res.status(200).json({ success: true, message: "Cart updated successfully.", cart });
+
+    const botSpeech = `I've added ${quantity} ${product.name} to your cart. Your subtotal is KES ${cart.subtotalKes}.`;
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Cart updated successfully.", 
+      cart,
+      fulfillmentText: botSpeech,
+      fulfillmentResponse: { messages: [{ text: { text: [botSpeech] } }] }
+    });
   } catch (error) {
-    return res.status(500).json({ message: "Error adding item to cart", error: error.message });
+    return res.status(500).json({ message: "Error adding item", error: error.message });
+  } finally {
+    // 🚨 CRITICAL: Always unlock
+    delete PENDING_WRITES[sessionId]; 
   }
 });
 
 // POST /modifyCart
 app.post("/modifyCart", async (req, res) => {
-  const sessionId = req.query.sessionId;
+  const sessionId = req.query.sessionId || req.body.sessionId;
   if (!sessionId) {
-    return res.status(400).json({ message: "sessionId query parameter is required" });
+    return res.status(400).json({ message: "sessionId is required" });
   }
 
   const { productId, quantity } = req.body;
-  const cart = getCart(sessionId);
-  const itemIndex = cart.items.findIndex(item => item.productId === productId);
-
-  if (itemIndex === -1) {
-    return res.status(404).json({ message: "productId not found in cart." });
-  }
+  
+  // 🚨 CRITICAL: Lock immediately
+  PENDING_WRITES[sessionId] = true;
 
   try {
+    const cart = getCart(sessionId);
+    const itemIndex = cart.items.findIndex(item => item.productId === productId);
+
+    if (itemIndex === -1) {
+      return res.status(404).json({ message: "productId not found in cart." });
+    }
+
+    let botSpeech = "";
+
     if (quantity <= 0) {
+      const removedName = cart.items[itemIndex].productName;
       cart.items.splice(itemIndex, 1);
+      botSpeech = `I've removed ${removedName} from your cart.`;
     } else {
       const product = await getProduct(productId);
       if (product && quantity > product.quantity) {
@@ -253,12 +192,24 @@ app.post("/modifyCart", async (req, res) => {
       }
       cart.items[itemIndex].quantity = quantity;
       cart.items[itemIndex].lineTotalKes = quantity * cart.items[itemIndex].unitCost;
+      botSpeech = `I've updated ${cart.items[itemIndex].productName} to ${quantity}.`;
     }
 
     recalc(cart);
-    return res.status(200).json({ success: true, message: "Cart updated successfully.", cart });
+    botSpeech += ` Your subtotal is KES ${cart.subtotalKes}.`;
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Cart updated successfully.", 
+      cart,
+      fulfillmentText: botSpeech,
+      fulfillmentResponse: { messages: [{ text: { text: [botSpeech] } }] }
+    });
   } catch (error) {
     return res.status(500).json({ message: "Error modifying cart", error: error.message });
+  } finally {
+    // 🚨 CRITICAL: Always unlock
+    delete PENDING_WRITES[sessionId];
   }
 });
 
@@ -268,82 +219,72 @@ app.post("/askToModifyCart", (req, res) => {
 });
 
 // ==========================================
-// CHECKOUT & SESSION ENDPOINTS
+// SESSION ENDPOINTS
 // ==========================================
 
-app.post("/session", async (req, res) => {
+app.post("/session", (req, res) => {
   const { sessionId, name, phone, location } = req.body;
-  if (!sessionId) {
-    return res.status(400).json({ message: "sessionId is required" });
-  }
-
-  console.log("Received session payload:", req.body);
-  const session = sanitizeSession({ name, phone, location });
-  SESSIONS[sessionId] = session;
-
-  try {
-    await upsertSession(sessionId, session);
-  } catch (error) {
-    // Keep serving from memory if warehouse write fails temporarily.
-    console.error("Failed to persist session in BigQuery:", error.message);
-  }
-
-  const responseData = { success: true, session };
-  console.log("Returning response:", responseData);
-  res.status(200).json(responseData);
+  SESSIONS[sessionId] = { name: name || "", phone: phone || "", location: location || "" };
+  res.status(200).json({ success: true, session: SESSIONS[sessionId] });
 });
 
-app.get("/session/:sessionId", async (req, res) => {
-  const sessionId = req.params.sessionId;
-  let session = SESSIONS[sessionId] || null;
-
+app.get("/session/:sessionId", (req, res) => {
+  const session = SESSIONS[req.params.sessionId];
   if (!session) {
-    try {
-      session = await readSessionFromStore(sessionId);
-      if (session) {
-        SESSIONS[sessionId] = session;
-      }
-    } catch (error) {
-      console.error("Failed to read session from BigQuery:", error.message);
-    }
+    return res.status(404).json({ message: `No session found for '${req.params.sessionId}'.` });
   }
-
-  if (!session) {
-    return res.status(404).json({ message: `No session found for '${sessionId}'.` });
-  }
-
   res.status(200).json({ success: true, session });
 });
 
-const EMPTY_CART_RECHECK_DELAY_MS = 450;
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// ==========================================
+// READERS (Waiting Room Endpoints)
+// ==========================================
 
-app.get("/cart/:sessionId", (req, res) => {
-  const cart = getCart(req.params.sessionId);
+app.get("/cart/:sessionId", async (req, res) => {
+  const sessionId = req.params.sessionId;
+
+  // 1. UNCONDITIONAL DELAY: Wait 2 seconds for lagging webhooks
+  await sleep(2000);
+
+  // 2. THE WAITING ROOM: Wait if a write is actively happening
+  let waitCycles = 0;
+  while (PENDING_WRITES[sessionId] && waitCycles < 20) {
+    await sleep(250);
+    waitCycles++;
+  }
+
+  const cart = getCart(sessionId);
   res.status(200).json({ success: true, cart });
 });
 
 app.get("/cartSummary/:sessionId", async (req, res) => {
   const sessionId = req.params.sessionId;
 
-  // First read
-  let cart = getCart(sessionId);
+  // 1. UNCONDITIONAL DELAY: Wait 2 seconds for lagging webhooks
+  await sleep(2000);
 
-  // Double-check guard: if empty, wait briefly and re-read once
+  // 2. THE WAITING ROOM
+  let waitCycles = 0;
+  while (PENDING_WRITES[sessionId] && waitCycles < 20) {
+    await sleep(250);
+    waitCycles++;
+  }
+  
+  const cart = getCart(sessionId);
+
   if (cart.items.length === 0) {
-    await sleep(EMPTY_CART_RECHECK_DELAY_MS);
-    cart = getCart(sessionId);
-
-    if (cart.items.length === 0) {
-      return res
-        .status(200)
-        .json({ summary: "Your cart is empty. Would you like to add anything?" });
-    }
+    return res.status(200).json({ 
+      summary: "Your cart is empty. Would you like to add anything?" 
+    });
   }
 
   const summary = `Your cart has ${cart.items.length} items. Subtotal: KES ${cart.subtotalKes}. Would you like to checkout or keep shopping?`;
   return res.status(200).json({ summary });
 });
+
+// ==========================================
+// CHECKOUT & PAYMENTS
+// ==========================================
 
 app.post("/checkout", async (req, res) => {
   const sessionId = req.query.sessionId;
@@ -353,22 +294,23 @@ app.post("/checkout", async (req, res) => {
   }
 
   try {
-    const cartServiceUrl = getCartServiceUrl(req);
+    // 1. UNCONDITIONAL DELAY: Wait 2 seconds for trailing clicks/webhooks
+    await sleep(2000); 
 
-    const cartResponse = await fetch(`${cartServiceUrl}/cart/${sessionId}`);
+    // 2. Fetch the cart (this hits the /cart route, which safely handles the lock)
+    const cartResponse = await fetch(`${CART_SERVICE_URL}/cart/${sessionId}`);
     const cartData = await cartResponse.json();
 
+    // 3. Check if empty
     if (!cartData?.cart?.items?.length) {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
     const realSubtotal = cartData.cart.subtotalKes;
 
-    const sessionResponse = await fetch(`${cartServiceUrl}/session/${sessionId}`);
+    const sessionResponse = await fetch(`${CART_SERVICE_URL}/session/${sessionId}`);
     if (!sessionResponse.ok) {
-      return res.status(404).json({
-        message: "No customer info found for this session",
-      });
+      return res.status(404).json({ message: "No customer info found for this session" });
     }
     const sessionData = await sessionResponse.json();
     const customer = sessionData.session;
@@ -409,7 +351,7 @@ app.post("/checkout", async (req, res) => {
             zip_code: "",
           },
         }),
-      },
+      }
     );
 
     if (!orderRequest.ok) {
@@ -442,12 +384,10 @@ app.post("/checkout", async (req, res) => {
 
 app.post("/checkout/ipn", async (req, res) => {
   console.log("IPN received:", req.body);
-
-  const { OrderTrackingId, OrderNotificationType, OrderMerchantReference } =
-    req.body;
+  const { OrderTrackingId } = req.body;
 
   const sessionId = Object.keys(ORDERS).find(
-    (key) => ORDERS[key].orderTrackingId === OrderTrackingId,
+    (key) => ORDERS[key].orderTrackingId === OrderTrackingId
   );
 
   if (sessionId) {
@@ -460,11 +400,10 @@ app.post("/checkout/ipn", async (req, res) => {
             Accept: "application/json",
             Authorization: `Bearer ${accessToken}`,
           },
-        },
+        }
       );
       const statusData = await statusResponse.json();
-      ORDERS[sessionId].status =
-        statusData.payment_status_description || "unknown";
+      ORDERS[sessionId].status = statusData.payment_status_description || "unknown";
     } catch (error) {
       console.error("Failed to fetch transaction status:", error.message);
     }
@@ -493,7 +432,6 @@ app.get("/paymentSummary/:sessionId", (req, res) => {
     return res.status(404).json({ summary: "I couldn't find an active order record for this session." });
   }
 
-  // Check if payment was successful based on Pesapal status
   const isPaid = order.status.toLowerCase() === 'completed' || order.status.toLowerCase() === 'success';
   
   let summary = "";
@@ -506,11 +444,6 @@ app.get("/paymentSummary/:sessionId", (req, res) => {
   res.status(200).json({ summary });
 });
 
-export const cart_agent = app;
-
-if (!process.env.FUNCTION_TARGET) {
-  app.listen(PORT, () => {
-    console.log(`SokoAI Cart & Checkout service running on port ${PORT}`);
-  });
-}
-
+app.listen(PORT, () => {
+  console.log(`SokoAI Cart & Checkout service running on port ${PORT}`);
+});

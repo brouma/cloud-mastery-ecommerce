@@ -209,7 +209,7 @@ jobs:
       DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT_EMAIL || secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
       CART_AGENT_FUNCTION_NAME: checkout-service
       CONNECT_BIGQUERY_FUNCTION_NAME: sync-mysql-to-bq
-      CAR_PARTS_FUNCTION_NAME: car-parts
+      CAR_PARTS_FUNCTION_NAME: search-parts
       SEARCH_PRODUCTS_FUNCTION_NAME: search-products
       BQ_DATASET: ${{ vars.BQ_DATASET || 'cloud_mastery' }}
       BQ_PRODUCTS_TABLE: ${{ vars.BQ_PRODUCTS_TABLE || 'products' }}
@@ -282,14 +282,24 @@ jobs:
             --region $REGION \
             --runtime nodejs22 \
             --entry-point cart_agent \
-            --source ./Cart-agent \
+            --source ./checkout-service \
             --service-account=$DEPLOYER_SERVICE_ACCOUNT \
             --trigger-http \
             --allow-unauthenticated \
+            --cpu 4 \
+            --concurrency 80 \
             --memory 512Mi \
-            --timeout 120s \
+            --timeout 240s \
             --quiet \
             --set-env-vars "^##^GCP_PROJECT_ID=$PROJECT_ID##BQ_PROJECT=$PROJECT_ID##BQ_DATASET=$BQ_DATASET##BQ_PRODUCTS_TABLE=$BQ_PRODUCTS_TABLE##PESAPAL_BASE_URL=${{ secrets.PESAPAL_BASE_URL }}##PESAPAL_CONSUMER_KEY=${{ secrets.PESAPAL_CONSUMER_KEY }}##PESAPAL_CONSUMER_SECRET=${{ secrets.PESAPAL_CONSUMER_SECRET }}##PESAPAL_NOTIFICATION_ID=${{ secrets.PESAPAL_NOTIFICATION_ID }}##PESAPAL_CALLBACK_URL=${{ needs.deploy-services.outputs.frontend_url }}##PESAPAL_BRANCH=${{ secrets.PESAPAL_BRANCH }}##PESAPAL_DEMO_AMOUNT=${{ secrets.PESAPAL_DEMO_AMOUNT }}##PESAPAL_PLACEHOLDER_EMAIL=${{ secrets.PESAPAL_PLACEHOLDER_EMAIL }}"
+
+      - name: Enable session affinity for Cart Agent service
+        run: |
+          gcloud run services update $CART_AGENT_FUNCTION_NAME_SAFE \
+            --region $REGION \
+            --project $PROJECT_ID \
+            --session-affinity \
+            --quiet
 
       - name: Deploy Connect BigQuery Cloud Function (Gen2)
         env:
@@ -316,7 +326,7 @@ jobs:
             --region $REGION \
             --runtime python311 \
             --entry-point search_parts \
-            --source ./Car-parts \
+            --source ./search-parts \
             --service-account=$DEPLOYER_SERVICE_ACCOUNT \
             --trigger-http \
             --allow-unauthenticated \
@@ -332,7 +342,7 @@ jobs:
             --region $REGION \
             --runtime python311 \
             --entry-point search_product \
-            --source ./Search-products \
+            --source ./search-products \
             --service-account=$DEPLOYER_SERVICE_ACCOUNT \
             --trigger-http \
             --allow-unauthenticated \
